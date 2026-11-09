@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens — light mode (plan §9.2) */
+:root {
+  --color-bg: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-surface-2: #f1f3f7;
+  --color-border: #e2e6ee;
+  --color-text: #111827;
+  --color-muted: #6b7280;
+  --color-primary: #6366f1;
+  --color-primary-fg: #ffffff;
+  --color-danger: #dc2626;
+  --color-success: #16a34a;
+}
+
+/* Dark mode overrides */
+.dark {
+  --color-bg: #0b0f17;
+  --color-surface: #141a24;
+  --color-surface-2: #1b2230;
+  --color-border: #263040;
+  --color-text: #e5e7eb;
+  --color-muted: #94a3b8;
+  --color-primary: #818cf8;
+  --color-primary-fg: #0b0f17;
+  --color-danger: #f87171;
+  --color-success: #4ade80;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Make the React Flow canvas match the theme */
+.react-flow__background {
+  background: var(--color-bg);
+}
+.react-flow__edge-path {
+  stroke: var(--color-muted);
+}
+.react-flow__handle {
+  background: var(--color-primary);
+  border: 2px solid var(--color-surface);
+  width: 10px;
+  height: 10px;
+}
+
+/* Zoom / fit / lock controls (bottom-left) — themed for light & dark */
+.react-flow__controls {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+.react-flow__controls-button {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  width: 28px;
+  height: 28px;
+}
+.react-flow__controls-button:hover {
+  background: var(--color-surface-2);
+}
+.react-flow__controls-button svg {
+  fill: var(--color-text);
+  max-width: 14px;
+  max-height: 14px;
+}
+
+/* MiniMap */
+.react-flow__minimap {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.react-flow__minimap-mask {
+  fill: var(--color-bg);
+  fill-opacity: 0.6;
+}
+.react-flow__minimap-node {
+  fill: var(--color-primary);
+}
+.react-flow__attribution {
+  display: none;
+}

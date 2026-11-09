@@ -1,0 +1,30 @@
+# .NET
+bin/
+obj/
+*.user
+*.db
+*.db-shm
+*.db-wal
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Editor
+.vs/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
+
+# Secrets and local configuration (never commit these)
+secrets.json
+appsettings.*.local.json
+.env
+.env.*
+!.env.example
+
+# Python (test client)
+__pycache__/
+*.pyc

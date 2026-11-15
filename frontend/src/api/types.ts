@@ -57,11 +57,15 @@ export interface InvitationRow {
 export interface NodeParameter {
   name: string;
   displayName: string;
-  type: "string" | "number" | "boolean" | "json" | "options" | "text" | "secret";
+  type: "string" | "number" | "boolean" | "json" | "options" | "text" | "secret" | "connection";
   required: boolean;
   default?: string | null;
   options?: string[] | null;
+  /** Human labels for `options`, same order (n8n-style operation labels). */
+  optionLabels?: string[] | null;
   placeholder?: string | null;
+  /** Show this field only when another parameter's current value is one of `values`. */
+  visibleWhen?: { param: string; values: string[] } | null;
 }
 
 export interface NodeDefinition {
@@ -80,11 +84,20 @@ export interface IntegrationAction {
   description: string;
 }
 
+export interface ProviderService {
+  key: string;
+  displayName: string;
+  connected: boolean;
+}
+
 export interface IntegrationProvider {
   key: string;
   displayName: string;
   isConfigured: boolean;
   isConnected: boolean;
+  services: ProviderService[];
+  connectedServiceCount: number;
+  serviceCount: number;
   actions: IntegrationAction[];
 }
 

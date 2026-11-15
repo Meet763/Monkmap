@@ -91,12 +91,25 @@ public class NodeParameter
 {
     public string Name { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
-    public string Type { get; set; } = "string"; // string, number, boolean, json, options
+    public string Type { get; set; } = "string"; // string, number, boolean, json, options, connection
     public bool Required { get; set; }
     public string? Default { get; set; }
     public string[]? Options { get; set; }
+
+    /// <summary>Human labels shown for each entry of <see cref="Options"/> (same order). Optional.</summary>
+    public string[]? OptionLabels { get; set; }
+
     public string? Placeholder { get; set; }
+
+    /// <summary>
+    /// When set, this field is only shown (n8n's "displayOptions") if another parameter's current
+    /// value is one of <see cref="ParamVisibility.Values"/>. Drives the Operation → fields behavior.
+    /// </summary>
+    public ParamVisibility? VisibleWhen { get; set; }
 }
+
+/// <summary>Show a field only when <paramref name="Param"/> currently equals one of <paramref name="Values"/>.</summary>
+public sealed record ParamVisibility(string Param, string[] Values);
 
 /// <summary>Every node type implements this.</summary>
 public interface INode

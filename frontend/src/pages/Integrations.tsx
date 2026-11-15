@@ -11,6 +11,8 @@ export function Integrations() {
   const [params, setParams] = useSearchParams();
   const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Which services the user has ticked, per provider. Seeded to "all" the first time a provider loads.
+  const [selected, setSelected] = useState<Record<string, Set<string>>>({});
 
   const { data: providers } = useQuery({
     queryKey: ["integrations"],
@@ -20,6 +22,22 @@ export function Integrations() {
     queryKey: ["connections"],
     queryFn: async () => (await api.get<ConnectionItem[]>("/connections")).data,
   });
+
+  // Default every provider's selection to all of its services, once.
+  useEffect(() => {
+    if (!providers) return;
+    setSelected((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const p of providers) {
+        if (!next[p.key]) {
+          next[p.key] = new Set(p.services.map((s) => s.key));
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [providers]);
 
   // Show the OAuth redirect outcome once, then clean the URL.
   useEffect(() => {
@@ -34,9 +52,25 @@ export function Integrations() {
     }
   }, [params, qc, setParams]);
 
+  function toggleService(providerKey: string, serviceKey: string) {
+    setSelected((prev) => {
+      const current = new Set(prev[providerKey] ?? []);
+      if (current.has(serviceKey)) current.delete(serviceKey);
+      else current.add(serviceKey);
+      return { ...prev, [providerKey]: current };
+    });
+  }
+
   async function connect(providerKey: string) {
+    const picks = selected[providerKey];
+    const hasServices = (providers?.find((p) => p.key === providerKey)?.services.length ?? 0) > 0;
+    if (hasServices && (!picks || picks.size === 0)) {
+      setBanner({ ok: false, text: "Select at least one service to connect." });
+      return;
+    }
     try {
-      const { data } = await api.get<{ url: string }>(`/integrations/${providerKey}/connect-url`);
+      const query = picks && picks.size > 0 ? `?services=${[...picks].join(",")}` : "";
+      const { data } = await api.get<{ url: string }>(`/integrations/${providerKey}/connect-url${query}`);
       window.location.href = data.url; // full redirect to the provider's consent screen
     } catch (err) {
       setBanner({ ok: false, text: apiError(err, "Could not start connection.") });
@@ -59,7 +93,8 @@ export function Integrations() {
     <div className="mx-auto max-w-4xl p-6">
       <h1 className="mb-1 text-2xl font-semibold">Integrations</h1>
       <p className="mb-6 text-sm text-muted">
-        Connect an account once. Workflows and AI agents then reuse it — no integration code.
+        Connect an account once — pick only the services you need. Workflows and AI agents then reuse
+        it, no integration code.
       </p>
 
       {banner && (
@@ -74,39 +109,82 @@ export function Integrations() {
 
       {/* Providers */}
       <div className="grid gap-3 sm:grid-cols-2">
-        {(providers ?? []).map((p) => (
-          <Card key={p.key} className="flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
-                  <Plug className="h-4 w-4 text-muted" />
-                </span>
-                <div>
-                  <div className="font-medium">{p.displayName}</div>
-                  <div className="text-xs text-muted">{p.actions.length} actions</div>
+        {(providers ?? []).map((p) => {
+          const picks = selected[p.key] ?? new Set<string>();
+          return (
+            <Card key={p.key} className="flex flex-col gap-3">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
+                    <Plug className="h-4 w-4 text-muted" />
+                  </span>
+                  <div>
+                    <div className="font-medium">{p.displayName}</div>
+                    <div className="text-xs text-muted">{p.actions.length} actions</div>
+                  </div>
                 </div>
+                {p.serviceCount > 0 && (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      p.connectedServiceCount > 0
+                        ? "bg-success/15 text-success"
+                        : "bg-surface-2 text-muted"
+                    }`}
+                  >
+                    {p.connectedServiceCount} / {p.serviceCount} connected
+                  </span>
+                )}
               </div>
-              {p.isConnected ? (
-                <span className="flex items-center gap-1 text-xs text-success">
-                  <Check className="h-4 w-4" /> Connected
-                </span>
-              ) : p.isConfigured ? (
-                <Button size="sm" onClick={() => connect(p.key)}>
-                  Connect
-                </Button>
-              ) : (
-                <span className="text-xs text-muted">Not configured</span>
+
+              {/* Services the user can pick */}
+              {p.isConfigured && p.services.length > 0 && (
+                <div className="space-y-1.5 rounded-lg border border-border p-2">
+                  {p.services.map((s) => (
+                    <label
+                      key={s.key}
+                      className="flex cursor-pointer items-center justify-between gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-surface-2"
+                    >
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 accent-[var(--color-primary)]"
+                          checked={picks.has(s.key)}
+                          onChange={() => toggleService(p.key, s.key)}
+                        />
+                        {s.displayName}
+                      </span>
+                      {s.connected && (
+                        <span className="flex items-center gap-1 text-[11px] text-success">
+                          <Check className="h-3.5 w-3.5" /> connected
+                        </span>
+                      )}
+                    </label>
+                  ))}
+                </div>
               )}
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {p.actions.map((a) => (
-                <span key={a.key} className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">
-                  {a.displayName}
-                </span>
-              ))}
-            </div>
-          </Card>
-        ))}
+
+              <div className="flex items-center justify-between">
+                <div className="flex flex-wrap gap-1">
+                  {p.actions.map((a) => (
+                    <span
+                      key={a.key}
+                      className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted"
+                    >
+                      {a.displayName}
+                    </span>
+                  ))}
+                </div>
+                {p.isConfigured ? (
+                  <Button size="sm" onClick={() => connect(p.key)}>
+                    {p.isConnected ? "Update" : "Connect"}
+                  </Button>
+                ) : (
+                  <span className="shrink-0 text-xs text-muted">Not configured</span>
+                )}
+              </div>
+            </Card>
+          );
+        })}
       </div>
 
       {/* Connected accounts */}

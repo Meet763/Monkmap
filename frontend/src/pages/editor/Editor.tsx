@@ -19,13 +19,13 @@ import "@xyflow/react/dist/style.css";
 import { api, apiError } from "@/api/client";
 import type { NodeDefinition, WorkflowDetail, WorkflowGraph } from "@/api/types";
 import { Button, Badge } from "@/components/ui";
-import { WfNode, type WfNodeData, type NodeStatus } from "./WfNode";
+import { WfNode, CanvasEditContext, type WfNodeData, type NodeStatus } from "./WfNode";
 import { NodeConfigPanel } from "./NodeConfigPanel";
 import { NodePalette } from "./NodePalette";
 import { TestConsole, type WebhookInfo } from "./TestConsole";
 import { createExecutionConnection } from "@/lib/signalr";
 import { LOCKED_REASON, NO_ACCESS, useAccess } from "@/lib/access";
-import { ArrowLeft, Lock, Play, Save, Unlock, Zap } from "lucide-react";
+import { ArrowLeft, Loader2, Lock, Play, Save, Unlock, Zap } from "lucide-react";
 
 const nodeTypes = { wfNode: WfNode };
 
@@ -52,6 +52,8 @@ export function Editor() {
 
   const hydrated = useRef(false);
   const counter = useRef(0);
+  const [lockBusy, setLockBusy] = useState(false);
+  const [activeBusy, setActiveBusy] = useState(false);
   const qc = useQueryClient();
 
   const { data: defs } = useQuery({
@@ -250,12 +252,15 @@ export function Editor() {
   async function toggleLock() {
     if (!workflowId) return;
     setError(null);
+    setLockBusy(true);
     try {
       await api.post(`/workflows/${workflowId}/${locked ? "unlock" : "lock"}`);
       await qc.invalidateQueries({ queryKey: ["workflow", workflowId] });
       await qc.invalidateQueries({ queryKey: ["workflows"] });
     } catch (err) {
       setError(apiError(err, "Could not change the lock."));
+    } finally {
+      setLockBusy(false);
     }
   }
 
@@ -267,8 +272,15 @@ export function Editor() {
       if (!wid) return;
     }
     const next = !isActive;
-    setIsActive(next);
-    await api.post(`/workflows/${wid}/activate?active=${next}`);
+    setActiveBusy(true);
+    try {
+      await api.post(`/workflows/${wid}/activate?active=${next}`);
+      setIsActive(next);
+    } catch (err) {
+      setError(apiError(err, "Could not change the Active switch."));
+    } finally {
+      setActiveBusy(false);
+    }
   }
 
   async function run() {
@@ -359,10 +371,14 @@ export function Editor() {
         <span title={canEdit ? "Arm triggers" : editReason}>
           <button
             onClick={toggleActive}
-            disabled={!canEdit}
+            disabled={!canEdit || activeBusy}
             className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-muted hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Zap className={isActive ? "h-4 w-4 text-success" : "h-4 w-4"} />
+            {activeBusy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Zap className={isActive ? "h-4 w-4 text-success" : "h-4 w-4"} />
+            )}
             {isActive ? "Active" : "Inactive"}
           </button>
         </span>
@@ -377,6 +393,7 @@ export function Editor() {
             size="sm"
             onClick={toggleLock}
             disabled={!!lockReason}
+            loading={lockBusy}
           >
             {locked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
             {locked ? "Unlock" : "Lock"}
@@ -409,13 +426,14 @@ export function Editor() {
 
       {/* Body */}
       <div className="flex min-h-0 flex-1">
-        <div title={canEdit ? "" : editReason} className="shrink-0">
-          <div className={canEdit ? "" : "pointer-events-none opacity-50"}>
+        <div title={canEdit ? "" : editReason} className="flex shrink-0">
+          <div className={`flex ${canEdit ? "" : "pointer-events-none opacity-50"}`}>
             <NodePalette defs={defs ?? []} onAdd={addNode} />
           </div>
         </div>
 
         <div className="min-w-0 flex-1">
+          <CanvasEditContext.Provider value={canEdit}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -435,9 +453,11 @@ export function Editor() {
             proOptions={{ hideAttribution: true }}
           >
             <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--color-border)" />
-            <Controls />
+            {/* showInteractive={false}: the lock lives in the top bar only, so there is one source of truth. */}
+            <Controls showInteractive={false} />
             <MiniMap pannable zoomable className="!bg-surface-2" />
           </ReactFlow>
+          </CanvasEditContext.Provider>
         </div>
 
         <div className="flex w-80 shrink-0 flex-col border-l border-border bg-surface">

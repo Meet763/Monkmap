@@ -31,14 +31,23 @@ public sealed class GoogleOAuthProvider : IOAuthProvider
     public string DisplayName => "Google";
     public bool IsConfigured => !string.IsNullOrWhiteSpace(_clientId) && !string.IsNullOrWhiteSpace(_clientSecret);
 
-    public IReadOnlyList<string> DefaultScopes => new[]
+    /// <summary>
+    /// Selectable Google services. Each service key matches the second segment of its action keys
+    /// (e.g. "calendar" ↔ google.calendar.*), which is how the UI knows an action needs that service.
+    /// </summary>
+    public IReadOnlyList<ProviderService> Services => new[]
     {
-        "openid", "email", "profile",
-        "https://www.googleapis.com/auth/calendar",
-        "https://www.googleapis.com/auth/gmail.send",
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive.readonly"
+        new ProviderService("calendar", "Google Calendar", new[] { "https://www.googleapis.com/auth/calendar" }),
+        new ProviderService("gmail", "Gmail", new[] { "https://www.googleapis.com/auth/gmail.send" }),
+        new ProviderService("sheets", "Google Sheets", new[] { "https://www.googleapis.com/auth/spreadsheets" }),
+        new ProviderService("drive", "Google Drive", new[] { "https://www.googleapis.com/auth/drive.readonly" })
     };
+
+    /// <summary>Base identity scopes (always requested) + every service scope.</summary>
+    public IReadOnlyList<string> DefaultScopes =>
+        new[] { "openid", "email", "profile" }
+            .Concat(Services.SelectMany(s => s.Scopes))
+            .ToList();
 
     public string BuildAuthorizationUrl(string redirectUri, string state, IEnumerable<string> scopes)
     {

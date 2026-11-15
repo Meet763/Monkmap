@@ -154,6 +154,81 @@ public class TeamController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Adds a person to this account with a password. If no login exists for the email, one is created
+    /// with that password, so the person can log in straight away. If a login already exists, they are
+    /// added as a member and their existing password is left alone.
+    /// </summary>
+    [HttpPost("account/members")]
+    public async Task<IActionResult> AddMember(AddMemberRequest req)
+    {
+        var acct = await _account.GetAsync();
+        acct.Require(Permissions.MembersManage);
+
+        var email = (req.Email ?? "").Trim().ToLowerInvariant();
+        if (!new EmailAddressAttribute().IsValid(email))
+            return BadRequest(new { message = "Enter a valid email address." });
+
+        var perms = await ResolvePermissionsAsync(req.Preset, req.Permissions);
+        if (perms.Length == 0)
+            return BadRequest(new { message = "Choose a preset or at least one permission." });
+        EnsureCanGrant(acct, perms);
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == email);
+        var created = false;
+
+        if (user is null)
+        {
+            if (string.IsNullOrWhiteSpace(req.FirstName) || string.IsNullOrWhiteSpace(req.LastName))
+                return BadRequest(new { message = "First and last name are required for a new person." });
+            if (string.IsNullOrEmpty(req.Password) || req.Password.Length < 6)
+                return BadRequest(new { message = "Set a password of at least 6 characters for the new person." });
+
+            var first = req.FirstName.Trim();
+            var last = req.LastName.Trim();
+            user = new WorkflowPlatform.Api.Entities.User
+            {
+                Email = email,
+                FirstName = first,
+                LastName = last,
+                DisplayName = $"{first} {last}".Trim(),
+                PasswordHash = PasswordHasher.Hash(req.Password)
+            };
+            _db.Users.Add(user);
+            created = true;
+        }
+
+        if (user.Id == acct.AccountId)
+            return BadRequest(new { message = "This is the account owner." });
+
+        var existing = await _db.AccountMemberships.FirstOrDefaultAsync(
+            m => m.AccountOwnerId == acct.AccountId && m.UserId == user.Id);
+        if (existing is not null)
+            return Conflict(new { message = "This person is already a member. Change their permissions instead." });
+
+        var membership = new AccountMembership
+        {
+            AccountOwnerId = acct.AccountId,
+            UserId = user.Id,
+            InvitedByUserId = acct.UserId,
+            CreatedAt = DateTime.UtcNow
+        };
+        _db.AccountMemberships.Add(membership);
+        await _catalog.ReplaceMembershipKeysAsync(membership.Id, perms);
+        await _db.SaveChangesAsync();
+
+        return Ok(new
+        {
+            userId = user.Id,
+            email,
+            permissions = perms,
+            loginCreated = created,
+            message = created
+                ? $"Added {email}. They can log in with this email and the password you set."
+                : $"Added {email}. They already had a login, so their existing password still works."
+        });
+    }
+
     [HttpGet("account/invitations")]
     public async Task<IActionResult> PendingInvitations()
     {

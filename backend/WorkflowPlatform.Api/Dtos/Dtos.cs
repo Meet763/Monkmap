@@ -40,6 +40,15 @@ public record WorkflowDetailDto(
 // ---- Team / invitations ----
 public record CreateInvitationRequest(string Email, string? Preset, string[]? Permissions);
 
+/// <summary>Adds a person directly: creates their login if needed, then gives them access.</summary>
+public record AddMemberRequest(
+    [Required, EmailAddress] string Email,
+    string? FirstName,
+    string? LastName,
+    string? Password,
+    string? Preset,
+    string[]? Permissions);
+
 public record UpdateMemberRequest(string[] Permissions);
 
 public record AcceptInvitationRequest(string Token);

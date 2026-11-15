@@ -241,6 +241,37 @@ def main():
                     later["token"])
         check("a revoked invitation is refused (404)", s == 404, str(s))
 
+    # ---- Add a member directly with a password, then log in as them ----
+    added_email = f"direct-{uuid.uuid4().hex[:8]}@test.local"
+    s, body = call("POST", "/api/account/members",
+                   {"email": added_email, "firstName": "Direct", "lastName": "Add",
+                    "password": "Direct#123", "preset": "Editor"}, owner["token"])
+    check("owner can add a member with a password", s == 200 and body.get("loginCreated") is True,
+          f"{s} {body}")
+
+    s, login = call("POST", "/api/auth/login", {"email": added_email, "password": "Direct#123"})
+    check("the added member can log in with that email and password", s == 200 and "token" in (login or {}),
+          f"{s} {login}")
+    if s == 200:
+        s, accts = call("GET", "/api/accounts", token=login["token"])
+        check("the added member sees the owner's workspace", s == 200 and any(
+            a["accountId"] == owner["id"] and a["isOwner"] is False for a in (accts or [])), str(accts))
+
+    s, body = call("POST", "/api/account/members",
+                   {"email": added_email, "preset": "Viewer"}, owner["token"])
+    check("adding the same person twice is refused (409)", s == 409, f"{s} {body}")
+
+    s, body = call("POST", "/api/account/members",
+                   {"email": f"short-{uuid.uuid4().hex[:6]}@test.local", "firstName": "S", "lastName": "T",
+                    "password": "abc", "preset": "Viewer"}, owner["token"])
+    check("a new member needs a password of 6+ characters (400)", s == 400, f"{s} {body}")
+
+    # The editor was removed earlier in this run, so re-adding them uses their existing login.
+    s, body = call("POST", "/api/account/members",
+                   {"email": editor["email"], "preset": "Viewer"}, owner["token"])
+    check("adding an existing login reuses it (no new login created)",
+          s == 200 and body.get("loginCreated") is False, f"{s} {body}")
+
     failed = [n for n, ok in results if not ok]
     print(f"\n{len(results) - len(failed)}/{len(results)} checks passed")
     sys.exit(1 if failed else 0)

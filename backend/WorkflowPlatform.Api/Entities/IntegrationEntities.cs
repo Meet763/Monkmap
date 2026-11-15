@@ -11,6 +11,7 @@ public class Connection
 
     public Guid UserId { get; set; }
     public User? User { get; set; }
+    
 
     /// <summary>Provider key, e.g. "google".</summary>
     public string Provider { get; set; } = string.Empty;

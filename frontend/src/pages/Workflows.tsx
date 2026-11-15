@@ -4,12 +4,14 @@ import { api, apiError } from "@/api/client";
 import type { WorkflowSummary } from "@/api/types";
 import { Badge, Button, Card, Spinner } from "@/components/ui";
 import { LOCKED_REASON, NO_ACCESS, denyReason, useAccess } from "@/lib/access";
+import { useDialog } from "@/components/ConfirmDialog";
 import { Lock, Plus, Workflow as WorkflowIcon, Trash2 } from "lucide-react";
 
 export function Workflows() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const access = useAccess();
+  const { confirm, notify } = useDialog();
   const canCreate = access.has("workflows.create");
   const canDelete = access.has("workflows.delete");
 
@@ -24,7 +26,7 @@ export function Workflows() {
   const remove = useMutation({
     mutationFn: async (id: string) => api.delete(`/workflows/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["workflows"] }),
-    onError: (err) => alert(apiError(err, "Could not delete the workflow.")),
+    onError: (err) => void notify("Could not delete the workflow", apiError(err, "Something went wrong.")),
   });
 
   return (
@@ -89,9 +91,15 @@ export function Workflows() {
                     <button
                       disabled={!!deleteReason}
                       className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted"
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation();
-                        if (confirm(`Delete "${wf.name}"?`)) remove.mutate(wf.id);
+                        const ok = await confirm({
+                          title: `Delete "${wf.name}"?`,
+                          message: "This permanently removes the workflow and its run history. This cannot be undone.",
+                          confirmText: "Delete workflow",
+                          danger: true,
+                        });
+                        if (ok) remove.mutate(wf.id);
                       }}
                     >
                       <Trash2 className="h-4 w-4" />

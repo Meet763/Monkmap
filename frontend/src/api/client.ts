@@ -1,11 +1,13 @@
 import axios from "axios";
 import { getSelectedAccountId, setSelectedAccountId } from "@/lib/accountStorage";
+import { endBusy, startBusy } from "@/lib/busy";
 
 export const TOKEN_KEY = "wf_token";
 
 export const api = axios.create({ baseURL: "/api" });
 
 api.interceptors.request.use((config) => {
+  startBusy();
   const token = localStorage.getItem(TOKEN_KEY);
   if (token) config.headers.Authorization = `Bearer ${token}`;
 
@@ -16,8 +18,12 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    endBusy();
+    return res;
+  },
   (err) => {
+    endBusy();
     if (err?.response?.status === 401 && localStorage.getItem(TOKEN_KEY)) {
       localStorage.removeItem(TOKEN_KEY);
       if (!location.pathname.startsWith("/login")) location.href = "/login";

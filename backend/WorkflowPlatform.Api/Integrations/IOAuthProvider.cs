@@ -7,6 +7,12 @@ public sealed record OAuthTokens(string AccessToken, string? RefreshToken, DateT
 public sealed record OAuthAccount(string Id, string Name);
 
 /// <summary>
+/// One selectable sub-service of a provider (e.g. Google → Calendar, Gmail, Sheets, Drive).
+/// A user can connect only the services they need; each maps to a set of OAuth scopes.
+/// </summary>
+public sealed record ProviderService(string Key, string DisplayName, IReadOnlyList<string> Scopes);
+
+/// <summary>
 /// One external identity provider (Google, Slack, Microsoft...). Implement this + register it to
 /// add a new provider — nothing else in the platform needs to change. This is what makes the
 /// integration system "open": the connect/callback/refresh flow is generic.
@@ -20,6 +26,12 @@ public interface IOAuthProvider
 
     /// <summary>Scopes requested by default when the user connects.</summary>
     IReadOnlyList<string> DefaultScopes { get; }
+
+    /// <summary>
+    /// The individually selectable services this provider exposes (Calendar, Gmail...). Lets the
+    /// user connect only some of them. Empty = provider is all-or-nothing (uses DefaultScopes).
+    /// </summary>
+    IReadOnlyList<ProviderService> Services { get; }
 
     /// <summary>True when client id/secret are configured; false shows a clear "not configured" error.</summary>
     bool IsConfigured { get; }

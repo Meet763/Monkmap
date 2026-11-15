@@ -1,8 +1,15 @@
+import { createContext, useContext } from "react";
 import { Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
 import * as Icons from "lucide-react";
 import { cn } from "@/lib/cn";
 
 export type NodeStatus = "idle" | "running" | "Succeeded" | "Failed" | "Skipped";
+
+/**
+ * True when the canvas can be edited. The editor sets it to false when the workflow is locked or
+ * the user has no edit permission. Nodes then hide their delete button.
+ */
+export const CanvasEditContext = createContext(true);
 
 export interface WfNodeData {
   nodeType: string;
@@ -25,6 +32,10 @@ function iconFor(name: string) {
     sparkles: "Sparkles",
     webhook: "Webhook",
     plug: "Plug",
+    mail: "Mail",
+    calendar: "Calendar",
+    table: "Table",
+    "hard-drive": "HardDrive",
     box: "Box",
   };
   const key = map[name] ?? "Box";
@@ -35,6 +46,7 @@ export function WfNode({ id, data, selected }: NodeProps) {
   const d = data as WfNodeData;
   const Icon = iconFor(d.icon);
   const { deleteElements } = useReactFlow();
+  const canEdit = useContext(CanvasEditContext);
 
   const statusRing =
     d.status === "running"
@@ -57,21 +69,23 @@ export function WfNode({ id, data, selected }: NodeProps) {
         statusRing
       )}
     >
-      {/* Delete button (shows on hover or when selected) */}
-      <button
-        title="Delete node"
-        className={cn(
-          "nodrag absolute -right-2 -top-2 z-10 h-5 w-5 items-center justify-center rounded-full bg-danger text-white shadow hover:opacity-90",
-          selected ? "flex" : "hidden group-hover:flex"
-        )}
-        onMouseDown={(e) => e.stopPropagation()}
-        onClick={(e) => {
-          e.stopPropagation();
-          deleteElements({ nodes: [{ id }] });
-        }}
-      >
-        <Icons.X className="h-3 w-3" />
-      </button>
+      {/* Delete button (hover or selected). Not rendered at all when the canvas is locked or read-only. */}
+      {canEdit && (
+        <button
+          title="Delete node"
+          className={cn(
+            "nodrag absolute -right-2 -top-2 z-10 h-5 w-5 items-center justify-center rounded-full bg-danger text-white shadow hover:opacity-90",
+            selected ? "flex" : "hidden group-hover:flex"
+          )}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            deleteElements({ nodes: [{ id }] });
+          }}
+        >
+          <Icons.X className="h-3 w-3" />
+        </button>
+      )}
 
       {!d.isTrigger && <Handle type="target" position={Position.Left} id="main" />}
 

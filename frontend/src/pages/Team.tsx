@@ -1,16 +1,11 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiError } from "@/api/client";
-import type { InvitationRow, MemberRow } from "@/api/types";
+import type { MemberRow } from "@/api/types";
 import { Badge, Button, Card, Input, Label, Spinner } from "@/components/ui";
-import {
-  NO_ACCESS,
-  denyReason,
-  useAccess,
-  usePermissionCatalog,
-} from "@/lib/access";
-import { Check, Copy, Trash2, UserPlus, Users } from "lucide-react";
+import { NO_ACCESS, denyReason, useAccess, usePermissionCatalog } from "@/lib/access";
+import { useDialog } from "@/components/ConfirmDialog";
+import { Eye, EyeOff, Trash2, UserPlus, Users } from "lucide-react";
 
 function PermissionChips({ permissions }: { permissions: string[] }) {
   const { labelFor } = usePermissionCatalog();
@@ -26,7 +21,7 @@ function PermissionChips({ permissions }: { permissions: string[] }) {
   );
 }
 
-/** Checkboxes for choosing permissions. Disabled ones are shown but cannot be changed. */
+/** Checkboxes for choosing permissions. Ones the user cannot give are shown but disabled. */
 function PermissionPicker({
   selected,
   onChange,
@@ -52,9 +47,7 @@ function PermissionPicker({
               disabled={!allowed}
               checked={selected.includes(key)}
               onChange={(e) =>
-                onChange(
-                  e.target.checked ? [...selected, key] : selected.filter((p) => p !== key)
-                )
+                onChange(e.target.checked ? [...selected, key] : selected.filter((p) => p !== key))
               }
             />
             {label}
@@ -68,59 +61,55 @@ function PermissionPicker({
 export function Team() {
   const qc = useQueryClient();
   const access = useAccess();
-  const [params, setParams] = useSearchParams();
-  const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(() => {
-    if (params.get("accepted")) return { ok: true, text: "You joined the workspace." };
-    if (params.get("inviteError")) return { ok: false, text: params.get("inviteError") ?? "" };
-    return null;
-  });
+  const catalog = usePermissionCatalog();
 
+  const { confirm } = useDialog();
   const canManage = access.has("members.manage");
   const manageReason = denyReason(canManage);
+
+  const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(null);
 
   const { data: members, isLoading } = useQuery({
     queryKey: ["members", access.current?.accountId],
     queryFn: async () => (await api.get<MemberRow[]>("/account/members")).data,
   });
 
-  const { data: invitations } = useQuery({
-    queryKey: ["invitations", access.current?.accountId, canManage],
-    queryFn: async () => (await api.get<InvitationRow[]>("/account/invitations")).data,
-    enabled: canManage,
-  });
-
-  // Invite form
+  // ---- Add member form ----
   const [email, setEmail] = useState("");
-  const catalog = usePermissionCatalog();
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [preset, setPreset] = useState("Viewer");
   const [customPerms, setCustomPerms] = useState<string[]>([]);
-  const [inviteLink, setInviteLink] = useState<{ email: string; link: string } | null>(null);
-  const [copied, setCopied] = useState(false);
 
-  const invite = useMutation({
+  const choice = preset === "Custom" ? customPerms : catalog.presetPermissions(preset);
+  const canSubmit =
+    canManage && email.trim().length > 0 && choice.length > 0 && password.length >= 6;
+
+  const addMember = useMutation({
     mutationFn: async () => {
-      const body =
-        preset === "Custom"
-          ? { email, permissions: customPerms }
-          : { email, preset };
-      return (await api.post<{ email: string; inviteLink: string }>("/account/invitations", body)).data;
+      const body = {
+        email: email.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        password,
+        ...(preset === "Custom" ? { permissions: customPerms } : { preset }),
+      };
+      return (await api.post<{ message: string }>("/account/members", body)).data;
     },
     onSuccess: (data) => {
-      setInviteLink({ email: data.email, link: data.inviteLink });
+      setBanner({ ok: true, text: data.message });
       setEmail("");
-      setCopied(false);
-      setBanner(null);
-      qc.invalidateQueries({ queryKey: ["invitations"] });
+      setFirstName("");
+      setLastName("");
+      setPassword("");
+      qc.invalidateQueries({ queryKey: ["members"] });
     },
-    onError: (err) => setBanner({ ok: false, text: apiError(err, "Could not create the invitation.") }),
+    onError: (err) => setBanner({ ok: false, text: apiError(err, "Could not add this person.") }),
   });
 
-  const revoke = useMutation({
-    mutationFn: async (id: string) => api.delete(`/account/invitations/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["invitations"] }),
-  });
-
-  // Member editing
+  // ---- Edit / remove members ----
   const [editing, setEditing] = useState<{ userId: string; permissions: string[] } | null>(null);
 
   const saveMember = useMutation({
@@ -128,6 +117,7 @@ export function Team() {
       api.put(`/account/members/${m.userId}`, { permissions: m.permissions }),
     onSuccess: () => {
       setEditing(null);
+      setBanner({ ok: true, text: "Permissions updated." });
       qc.invalidateQueries({ queryKey: ["members"] });
     },
     onError: (err) => setBanner({ ok: false, text: apiError(err, "Could not save the permissions.") }),
@@ -135,24 +125,19 @@ export function Team() {
 
   const removeMember = useMutation({
     mutationFn: async (userId: string) => api.delete(`/account/members/${userId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }),
+    onSuccess: () => {
+      setBanner({ ok: true, text: "Member removed. They no longer have access to this workspace." });
+      qc.invalidateQueries({ queryKey: ["members"] });
+    },
     onError: (err) => setBanner({ ok: false, text: apiError(err, "Could not remove the member.") }),
   });
-
-  function dismissBanner() {
-    setBanner(null);
-    if (params.get("accepted") || params.get("inviteError")) setParams({}, { replace: true });
-  }
-
-  const inviteChoice = preset === "Custom" ? customPerms : catalog.presetPermissions(preset);
-  const canSendInvite = canManage && email.trim().length > 0 && inviteChoice.length > 0;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <div>
         <h1 className="text-2xl font-semibold">Team</h1>
         <p className="text-sm text-muted">
-          Invite people into this workspace and choose what each one can do.
+          Add people to this workspace with an email and password, and choose what each one can do.
         </p>
       </div>
 
@@ -163,21 +148,22 @@ export function Team() {
           }`}
         >
           <span>{banner.text}</span>
-          <button onClick={dismissBanner} className="text-muted hover:text-text">
+          <button onClick={() => setBanner(null)} className="text-muted hover:text-text">
             Dismiss
           </button>
         </div>
       )}
 
-      {/* Invite */}
+      {/* Add member */}
       <Card>
         <div className="mb-4 flex items-center gap-2">
           <UserPlus className="h-4 w-4 text-primary" />
-          <h2 className="font-medium">Invite someone</h2>
+          <h2 className="font-medium">Add a member</h2>
         </div>
+
         <div className="grid gap-4 md:grid-cols-2">
           <div>
-            <Label>Email</Label>
+            <Label>Email (their login)</Label>
             <Input
               type="email"
               placeholder="colleague@company.com"
@@ -188,6 +174,48 @@ export function Team() {
             />
           </div>
           <div>
+            <Label>Password (at least 6 characters)</Label>
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+                placeholder="Set a password for them"
+                value={password}
+                disabled={!canManage}
+                title={manageReason}
+                onChange={(e) => setPassword(e.target.value)}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((s) => !s)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted hover:text-text"
+                title={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <Label>First name</Label>
+            <Input
+              placeholder="Used if this is a new login"
+              value={firstName}
+              disabled={!canManage}
+              title={manageReason}
+              onChange={(e) => setFirstName(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label>Last name</Label>
+            <Input
+              value={lastName}
+              disabled={!canManage}
+              title={manageReason}
+              onChange={(e) => setLastName(e.target.value)}
+            />
+          </div>
+          <div className="md:col-span-2">
             <Label>Permission preset</Label>
             <select
               className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm"
@@ -198,7 +226,6 @@ export function Team() {
                 const next = e.target.value;
                 setPreset(next);
                 if (next === "Custom") {
-                  // Start the custom list from the preset the user was on.
                   if (customPerms.length === 0) setCustomPerms(catalog.presetPermissions(preset));
                 } else {
                   setCustomPerms(catalog.presetPermissions(next));
@@ -218,74 +245,32 @@ export function Team() {
         {preset === "Custom" && (
           <div className="mt-4">
             <Label>Permissions</Label>
-            <PermissionPicker
-              selected={customPerms}
-              onChange={setCustomPerms}
-              canGrant={(p) => access.has(p)}
-            />
+            <PermissionPicker selected={customPerms} onChange={setCustomPerms} canGrant={(p) => access.has(p)} />
           </div>
         )}
 
-        <div className="mt-4 flex items-center gap-3">
-          <span title={canSendInvite ? "" : manageReason || "Enter an email and choose permissions"}>
-            <Button
-              onClick={() => invite.mutate()}
-              disabled={!canSendInvite}
-              loading={invite.isPending}
-            >
-              <UserPlus className="h-4 w-4" /> Create invite link
+        <p className="mt-4 text-xs text-muted">
+          If this email already has a login, they are added to your workspace and keep their existing
+          password. The password you type is used only for a new login.
+        </p>
+
+        <div className="mt-4">
+          <span
+            title={
+              canSubmit
+                ? ""
+                : manageReason ||
+                  (password.length > 0 && password.length < 6
+                    ? "Password must be at least 6 characters"
+                    : "Enter an email, a password, and choose permissions")
+            }
+          >
+            <Button onClick={() => addMember.mutate()} disabled={!canSubmit} loading={addMember.isPending}>
+              <UserPlus className="h-4 w-4" /> Add member
             </Button>
           </span>
         </div>
-
-        {inviteLink && (
-          <div className="mt-4 rounded-lg border border-border bg-surface-2 p-3">
-            <p className="mb-2 text-sm">
-              Send this link to <span className="font-medium">{inviteLink.email}</span>. It works for
-              7 days and is shown only once.
-            </p>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 truncate rounded bg-surface px-2 py-1.5 text-xs">{inviteLink.link}</code>
-              <button
-                onClick={() => {
-                  navigator.clipboard?.writeText(inviteLink.link);
-                  setCopied(true);
-                }}
-                className="rounded-md p-1.5 text-muted hover:bg-surface"
-                title="Copy link"
-              >
-                {copied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-        )}
       </Card>
-
-      {/* Pending invitations */}
-      {canManage && (
-        <Card>
-          <h2 className="mb-3 font-medium">Pending invitations</h2>
-          {!invitations || invitations.length === 0 ? (
-            <p className="text-sm text-muted">No pending invitations.</p>
-          ) : (
-            <div className="divide-y divide-border">
-              {invitations.map((inv) => (
-                <div key={inv.id} className="flex items-center justify-between gap-4 py-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">{inv.email}</div>
-                    <div className="mt-1">
-                      <PermissionChips permissions={inv.permissions} />
-                    </div>
-                  </div>
-                  <Button variant="ghost" size="sm" onClick={() => revoke.mutate(inv.id)}>
-                    Revoke
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
 
       {/* Members */}
       <Card>
@@ -326,8 +311,15 @@ export function Team() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => {
-                            if (confirm(`Remove ${m.name} from this workspace?`)) removeMember.mutate(m.userId);
+                          loading={removeMember.isPending && removeMember.variables === m.userId}
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: `Remove ${m.name}?`,
+                              message: `${m.email} will lose access to this workspace. Their own account and login stay.`,
+                              confirmText: "Remove member",
+                              danger: true,
+                            });
+                            if (ok) removeMember.mutate(m.userId);
                           }}
                         >
                           <Trash2 className="h-4 w-4" />

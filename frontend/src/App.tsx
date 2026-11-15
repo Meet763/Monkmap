@@ -11,6 +11,8 @@ import { Executions } from "@/pages/Executions";
 import { ExecutionDetail } from "@/pages/ExecutionDetail";
 import { Integrations } from "@/pages/Integrations";
 import { Team } from "@/pages/Team";
+import { GlobalLoader } from "@/components/GlobalLoader";
+import { ConfirmProvider } from "@/components/ConfirmDialog";
 import { InviteAccept } from "@/pages/InviteAccept";
 import {
   SettingsLayout,
@@ -33,7 +35,9 @@ export default function App() {
   }, [token, loadMe]);
 
   return (
+    <ConfirmProvider>
     <BrowserRouter>
+      <GlobalLoader />
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
@@ -75,5 +79,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
+    </ConfirmProvider>
   );
 }

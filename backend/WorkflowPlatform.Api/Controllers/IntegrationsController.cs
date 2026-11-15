@@ -40,38 +40,96 @@ public class IntegrationsController : ControllerBase
     public async Task<IActionResult> List()
     {
         var userId = User.GetUserId();
-        var connectedProviders = await _db.Connections
+        var connections = await _db.Connections
             .Where(c => c.UserId == userId)
-            .Select(c => c.Provider)
+            .Select(c => new { c.Provider, c.ScopesJson })
             .ToListAsync();
 
-        var result = _providers.All.Select(p => new
+        var result = _providers.All.Select(p =>
         {
-            key = p.Key,
-            displayName = p.DisplayName,
-            isConfigured = p.IsConfigured,
-            isConnected = connectedProviders.Contains(p.Key),
-            actions = _actions.ForProvider(p.Key)
-                .Select(a => new { key = a.Key, displayName = a.DisplayName, description = a.Description })
+            var connection = connections.FirstOrDefault(c => c.Provider == p.Key);
+            var grantedScopes = connection is null
+                ? new HashSet<string>()
+                : new HashSet<string>(DeserializeScopes(connection.ScopesJson));
+
+            // A service counts as connected when every scope it needs has been granted.
+            var services = p.Services.Select(s => new
+            {
+                key = s.Key,
+                displayName = s.DisplayName,
+                connected = connection is not null && s.Scopes.All(grantedScopes.Contains)
+            }).ToList();
+
+            return new
+            {
+                key = p.Key,
+                displayName = p.DisplayName,
+                isConfigured = p.IsConfigured,
+                isConnected = connection is not null,
+                services,
+                connectedServiceCount = services.Count(s => s.connected),
+                serviceCount = services.Count,
+                actions = _actions.ForProvider(p.Key)
+                    .Select(a => new { key = a.Key, displayName = a.DisplayName, description = a.Description })
+            };
         });
 
         return Ok(result);
     }
 
-    /// <summary>Return the URL the browser should open to start the OAuth consent flow.</summary>
+    /// <summary>
+    /// Return the URL the browser should open to start the OAuth consent flow. The optional
+    /// <paramref name="services"/> query (comma-separated service keys, e.g. "calendar,gmail")
+    /// requests only those services' scopes; omit it to request everything.
+    /// </summary>
     [Authorize]
     [HttpGet("{provider}/connect-url")]
-    public IActionResult ConnectUrl(string provider)
+    public IActionResult ConnectUrl(string provider, [FromQuery] string? services)
     {
         if (!_providers.TryGet(provider, out var p))
             return NotFound(new { message = $"Unknown provider '{provider}'." });
         if (!p.IsConfigured)
             return BadRequest(new { message = $"{p.DisplayName} is not configured. Set Integrations:{p.DisplayName}:ClientId/ClientSecret." });
 
+        var scopes = ScopesForSelection(p, services);
+        if (scopes.Count == 0)
+            return BadRequest(new { message = "Select at least one service to connect." });
+
         var userId = User.GetUserId();
         var state = _protector.ProtectState(JsonSerializer.Serialize(new { userId, provider = p.Key }));
-        var url = p.BuildAuthorizationUrl(RedirectUriFor(p.Key), state, p.DefaultScopes);
+        var url = p.BuildAuthorizationUrl(RedirectUriFor(p.Key), state, scopes);
         return Ok(new { url });
+    }
+
+    /// <summary>
+    /// Base identity scopes (always kept) plus the scopes of the selected services. A null/empty
+    /// selection means "all services".
+    /// </summary>
+    private static IReadOnlyList<string> ScopesForSelection(IOAuthProvider p, string? services)
+    {
+        var selected = (services ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // No services defined on the provider → fall back to its default scopes.
+        if (p.Services.Count == 0) return p.DefaultScopes;
+
+        var allServiceScopes = p.Services.SelectMany(s => s.Scopes).ToHashSet();
+        var chosenServiceScopes = p.Services
+            .Where(s => selected.Count == 0 || selected.Contains(s.Key))
+            .SelectMany(s => s.Scopes)
+            .ToHashSet();
+
+        // Keep base scopes (not owned by any service) + the chosen services' scopes.
+        return p.DefaultScopes
+            .Where(sc => !allServiceScopes.Contains(sc) || chosenServiceScopes.Contains(sc))
+            .ToList();
+    }
+
+    private static string[] DeserializeScopes(string json)
+    {
+        try { return JsonSerializer.Deserialize<string[]>(json) ?? Array.Empty<string>(); }
+        catch { return Array.Empty<string>(); }
     }
 
     /// <summary>OAuth callback. The browser lands here from the provider; identity is in state.</summary>
